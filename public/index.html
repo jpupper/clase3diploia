@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visual Synth — Controller</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a28;
+    --border: #2a2a3e;
+    --text: #e0e0f0;
+    --text-dim: #707088;
+    --accent: #ff0066;
+    --accent2: #00ff88;
+    --gold: #ffd700;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  .container {
+    max-width: 720px;
+    width: 100%;
+  }
+
+  /* ── Header ── */
+  .header {
+    text-align: center;
+    padding: 32px 0 24px;
+    position: relative;
+  }
+
+  .header::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 10%; right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), var(--accent2), transparent);
+  }
+
+  .header h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2), var(--gold));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.02em;
+  }
+
+  .header p {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    margin-top: 6px;
+    font-weight: 300;
+  }
+
+  /* ── Status bar ── */
+  .status-bar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 0 20px;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    animation: pulse 2s infinite;
+  }
+  .status-dot.online { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
+  .status-dot.offline { background: #ff4455; box-shadow: 0 0 8px #ff4455; }
+  .status-dot.connecting { background: #ffaa00; box-shadow: 0 0 8px #ffaa00; animation: pulse 0.5s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 16px;
+    transition: border-color 0.3s;
+  }
+  .card:hover { border-color: #3a3a55; }
+
+  .card-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title .icon { font-size: 1rem; }
+
+  /* ── Color picker row ── */
+  .color-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .color-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .color-group label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .color-group input[type="color"] {
+    width: 60px; height: 60px;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    cursor: pointer;
+    background: none;
+    padding: 0;
+    transition: border-color 0.3s, transform 0.2s;
+  }
+  .color-group input[type="color"]:hover {
+    border-color: var(--accent);
+    transform: scale(1.05);
+  }
+  .color-group input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+  .color-group input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: 10px;
+  }
+
+  /* ── Gradient preview ── */
+  .gradient-preview {
+    height: 32px;
+    border-radius: 8px;
+    margin-top: 16px;
+    border: 1px solid var(--border);
+    transition: background 0.3s;
+  }
+
+  /* ── Sliders ── */
+  .slider-group {
+    margin-bottom: 14px;
+  }
+  .slider-group:last-child { margin-bottom: 0; }
+
+  .slider-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .slider-header label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .slider-header .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--accent2);
+    font-weight: 500;
+    min-width: 40px;
+    text-align: right;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--surface2), var(--border));
+    outline: none;
+    transition: background 0.3s;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--accent2);
+    cursor: pointer;
+    border: 2px solid var(--surface);
+    box-shadow: 0 0 12px rgba(0,255,136,0.3);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 20px rgba(0,255,136,0.5);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--accent2);
+    cursor: pointer;
+    border: 2px solid var(--surface);
+  }
+
+  /* ── Presets ── */
+  .preset-grid {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .preset-btn {
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .preset-btn:hover {
+    border-color: var(--accent2);
+    background: rgba(0,255,136,0.08);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(0,255,136,0.15);
+  }
+  .preset-btn:active {
+    transform: translateY(0);
+  }
+
+  /* ── Action buttons ── */
+  .actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  .btn {
+    flex: 1;
+    padding: 14px 24px;
+    border: none;
+    border-radius: 12px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn:active { transform: scale(0.97); }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #cc0055);
+    color: white;
+    box-shadow: 0 4px 20px rgba(255,0,102,0.3);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 6px 30px rgba(255,0,102,0.5);
+    transform: translateY(-2px);
+  }
+
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover {
+    border-color: var(--text-dim);
+    background: #222238;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 480px) {
+    body { padding: 12px; }
+    .card { padding: 16px; }
+    .header h1 { font-size: 1.5rem; }
+    .color-group input[type="color"] { width: 50px; height: 50px; }
+    .actions { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Header -->
+  <div class="header">
+    <h1>◈ VISUAL SYNTH</h1>
+    <p>Shader de ruido interactivo · sincronizado por WebSocket</p>
+  </div>
+
+  <!-- Status -->
+  <div class="status-bar">
+    <span>Estado:</span>
+    <span class="status-dot offline" id="statusDot"></span>
+    <span id="statusText">Desconectado</span>
+    <span>|</span>
+    <span id="peersText">0 peers</span>
+  </div>
+
+  <!-- Colors -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🎨</span> Colores</div>
+    <div class="color-row">
+      <div class="color-group">
+        <label>Color 1</label>
+        <input type="color" id="color1" value="#ff0055">
+      </div>
+      <div class="color-group">
+        <label>Color 2</label>
+        <input type="color" id="color2" value="#00ff88">
+      </div>
+      <div class="color-group">
+        <label>Color 3</label>
+        <input type="color" id="color3" value="#4466ff">
+      </div>
+    </div>
+    <div class="gradient-preview" id="gradientPreview" style="background: linear-gradient(90deg, #ff0055, #00ff88, #4466ff);"></div>
+  </div>
+
+  <!-- Noise -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🌊</span> Ruido</div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Speed</label><span class="value" id="speedVal">0.30</span></div>
+      <input type="range" id="speed" min="0" max="2" step="0.01" value="0.30">
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Scale</label><span class="value" id="scaleVal">2.00</span></div>
+      <input type="range" id="scale" min="0.2" max="6" step="0.05" value="2.00">
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Octaves</label><span class="value" id="octavesVal">4</span></div>
+      <input type="range" id="octaves" min="1" max="8" step="1" value="4">
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Distortion</label><span class="value" id="distortionVal">0.50</span></div>
+      <input type="range" id="distortion" min="0" max="3" step="0.01" value="0.50">
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Warp Speed</label><span class="value" id="warpSpeedVal">0.50</span></div>
+      <input type="range" id="warpSpeed" min="0" max="3" step="0.01" value="0.50">
+    </div>
+  </div>
+
+  <!-- Effects -->
+  <div class="card">
+    <div class="card-title"><span class="icon">✨</span> Efectos</div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Contrast</label><span class="value" id="contrastVal">1.00</span></div>
+      <input type="range" id="contrast" min="0" max="3" step="0.01" value="1.00">
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Brightness</label><span class="value" id="brightnessVal">0.50</span></div>
+      <input type="range" id="brightness" min="0" max="1" step="0.01" value="0.50">
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Saturation</label><span class="value" id="saturationVal">1.00</span></div>
+      <input type="range" id="saturation" min="0" max="1.5" step="0.01" value="1.00">
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Rotation</label><span class="value" id="rotationVal">0.00</span></div>
+      <input type="range" id="rotation" min="0" max="1" step="0.01" value="0.00">
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Blobs</label><span class="value" id="blobVal">0.00</span></div>
+      <input type="range" id="blobAmount" min="0" max="1" step="0.01" value="0.00">
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><label>Lines</label><span class="value" id="lineVal">0.00</span></div>
+      <input type="range" id="lineAmount" min="0" max="1" step="0.01" value="0.00">
+    </div>
+  </div>
+
+  <!-- Presets -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🎯</span> Presets</div>
+    <div class="preset-grid">
+      <button class="preset-btn" data-preset="lava">🌋 Lava</button>
+      <button class="preset-btn" data-preset="ocean">🌊 Ocean</button>
+      <button class="preset-btn" data-preset="neon">💜 Neon</button>
+      <button class="preset-btn" data-preset="aurora">🌌 Aurora</button>
+      <button class="preset-btn" data-preset="fire">🔥 Fire</button>
+      <button class="preset-btn" data-preset="deepsea">🐋 Deep Sea</button>
+      <button class="preset-btn" data-preset="sunset">🌅 Sunset</button>
+      <button class="preset-btn" data-preset="matrix">💚 Matrix</button>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="card" style="border-color: transparent; background: transparent; padding: 0;">
+    <div class="actions">
+      <button class="btn btn-primary" id="openVisualBtn">🖥  Abrir Visual Output</button>
+      <button class="btn btn-secondary" id="resetBtn">↺ Reset</button>
+    </div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+
+// ── DOM refs ─────────────────────────────────────────────────────
+const controls = {
+  speed:         { el: document.getElementById('speed'),         val: document.getElementById('speedVal') },
+  scale:         { el: document.getElementById('scale'),         val: document.getElementById('scaleVal') },
+  octaves:       { el: document.getElementById('octaves'),       val: document.getElementById('octavesVal') },
+  distortion:    { el: document.getElementById('distortion'),    val: document.getElementById('distortionVal') },
+  warpSpeed:     { el: document.getElementById('warpSpeed'),     val: document.getElementById('warpSpeedVal') },
+  contrast:      { el: document.getElementById('contrast'),      val: document.getElementById('contrastVal') },
+  brightness:    { el: document.getElementById('brightness'),    val: document.getElementById('brightnessVal') },
+  saturation:    { el: document.getElementById('saturation'),    val: document.getElementById('saturationVal') },
+  rotation:      { el: document.getElementById('rotation'),      val: document.getElementById('rotationVal') },
+  blobAmount:    { el: document.getElementById('blobAmount'),    val: document.getElementById('blobVal') },
+  lineAmount:    { el: document.getElementById('lineAmount'),    val: document.getElementById('lineVal') },
+};
+
+const color1 = document.getElementById('color1');
+const color2 = document.getElementById('color2');
+const color3 = document.getElementById('color3');
+const gradientPreview = document.getElementById('gradientPreview');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const peersText = document.getElementById('peersText');
+const openVisualBtn = document.getElementById('openVisualBtn');
+const resetBtn = document.getElementById('resetBtn');
+
+let isUpdatingFromServer = false;
+
+// ── Leer estado actual del DOM ───────────────────────────────────
+function readState() {
+  const state = {};
+  for (const [key, ctrl] of Object.entries(controls)) {
+    const raw = ctrl.el.value;
+    state[key] = ctrl.el.step === '1' ? parseInt(raw) : parseFloat(raw);
+  }
+  state.color1 = color1.value;
+  state.color2 = color2.value;
+  state.color3 = color3.value;
+  return state;
+}
+
+// ── Aplicar estado al DOM ────────────────────────────────────────
+function applyState(state) {
+  isUpdatingFromServer = true;
+  for (const [key, ctrl] of Object.entries(controls)) {
+    if (state[key] !== undefined) {
+      ctrl.el.value = state[key];
+      ctrl.val.textContent = formatValue(state[key], ctrl.el.step === '1');
+    }
+  }
+  if (state.color1) color1.value = state.color1;
+  if (state.color2) color2.value = state.color2;
+  if (state.color3) color3.value = state.color3;
+  updateGradient();
+  isUpdatingFromServer = false;
+}
+
+function formatValue(v, isInt) {
+  return isInt ? v.toString() : v.toFixed(2);
+}
+
+// ── Gradient preview ─────────────────────────────────────────────
+function updateGradient() {
+  gradientPreview.style.background =
+    `linear-gradient(90deg, ${color1.value}, ${color2.value}, ${color3.value})`;
+}
+
+// ── Enviar actualización al servidor ─────────────────────────────
+function sendUpdate(key, value) {
+  if (isUpdatingFromServer) return;
+  const payload = {};
+  // Incluir también colores si se cambiaron
+  const full = readState();
+  // Pero solo enviar lo que cambió + colores
+  for (const [k, ctrl] of Object.entries(controls)) {
+    if (k === key) {
+      const raw = ctrl.el.value;
+      payload[k] = ctrl.el.step === '1' ? parseInt(raw) : parseFloat(raw);
+    }
+  }
+  // Siempre incluir colores
+  payload.color1 = color1.value;
+  payload.color2 = color2.value;
+  payload.color3 = color3.value;
+  socket.emit('update', payload);
+}
+
+// ── Socket events ────────────────────────────────────────────────
+socket.on('connect', () => {
+  statusDot.className = 'status-dot online';
+  statusText.textContent = 'Conectado';
+  socket.emit('getState');
+});
+
+socket.on('disconnect', () => {
+  statusDot.className = 'status-dot offline';
+  statusText.textContent = 'Desconectado';
+});
+
+socket.on('init', (state) => {
+  applyState(state);
+  statusDot.className = 'status-dot online';
+  statusText.textContent = 'Conectado';
+});
+
+socket.on('state', (state) => {
+  applyState(state);
+});
+
+// ── Presets ──────────────────────────────────────────────────────
+const PRESETS = {
+  lava:     { speed: 0.4, scale: 1.5, octaves: 5, distortion: 1.2, warpSpeed: 0.8, contrast: 1.3, brightness: 0.5, saturation: 1.2, rotation: 0, blobAmount: 0.2, lineAmount: 0, color1: '#ff4400', color2: '#ffaa00', color3: '#660000' },
+  ocean:    { speed: 0.15, scale: 2.5, octaves: 4, distortion: 0.6, warpSpeed: 0.3, contrast: 0.9, brightness: 0.45, saturation: 1.0, rotation: 0.2, blobAmount: 0, lineAmount: 0, color1: '#004488', color2: '#00aaff', color3: '#004466' },
+  neon:     { speed: 0.6, scale: 1.8, octaves: 3, distortion: 1.5, warpSpeed: 1.2, contrast: 1.5, brightness: 0.55, saturation: 1.3, rotation: 0.1, blobAmount: 0.3, lineAmount: 0.2, color1: '#ff00ff', color2: '#00ffff', color3: '#ffff00' },
+  aurora:   { speed: 0.1, scale: 3.0, octaves: 5, distortion: 0.8, warpSpeed: 0.2, contrast: 0.8, brightness: 0.5, saturation: 1.1, rotation: 0.3, blobAmount: 0, lineAmount: 0, color1: '#00ff66', color2: '#8844ff', color3: '#0066ff' },
+  fire:     { speed: 0.5, scale: 1.2, octaves: 6, distortion: 0.9, warpSpeed: 0.7, contrast: 1.4, brightness: 0.55, saturation: 1.2, rotation: 0, blobAmount: 0.1, lineAmount: 0.3, color1: '#ff0000', color2: '#ff6600', color3: '#ffcc00' },
+  deepsea:  { speed: 0.08, scale: 4.0, octaves: 3, distortion: 0.3, warpSpeed: 0.1, contrast: 0.7, brightness: 0.35, saturation: 0.8, rotation: 0.15, blobAmount: 0, lineAmount: 0, color1: '#000033', color2: '#003366', color3: '#0099ff' },
+  sunset:   { speed: 0.2, scale: 2.0, octaves: 4, distortion: 0.5, warpSpeed: 0.4, contrast: 1.0, brightness: 0.5, saturation: 1.0, rotation: 0.05, blobAmount: 0, lineAmount: 0.1, color1: '#ff4466', color2: '#ff8844', color3: '#ffcc00' },
+  matrix:   { speed: 0.3, scale: 1.0, octaves: 2, distortion: 0.1, warpSpeed: 0.1, contrast: 1.8, brightness: 0.4, saturation: 1.5, rotation: 0, blobAmount: 0.8, lineAmount: 0.9, color1: '#00ff00', color2: '#00cc00', color3: '#003300' },
+};
+
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const preset = PRESETS[btn.dataset.preset];
+    if (!preset) return;
+    applyState(preset);
+    // Enviar preset completo
+    socket.emit('update', readState());
+  });
+});
+
+// ── Input events ─────────────────────────────────────────────────
+for (const [key, ctrl] of Object.entries(controls)) {
+  ctrl.el.addEventListener('input', () => {
+    const v = ctrl.el.step === '1' ? parseInt(ctrl.el.value) : parseFloat(ctrl.el.value);
+    ctrl.val.textContent = formatValue(v, ctrl.el.step === '1');
+    sendUpdate(key, ctrl.el.value);
+  });
+}
+
+[color1, color2, color3].forEach(input => {
+  input.addEventListener('input', () => {
+    updateGradient();
+    const payload = { color1: color1.value, color2: color2.value, color3: color3.value };
+    socket.emit('update', payload);
+  });
+});
+
+// ── Actions ──────────────────────────────────────────────────────
+openVisualBtn.addEventListener('click', () => {
+  const url = `${window.location.protocol}//${window.location.hostname}:${window.location.port}/visual.html`;
+  window.open(url, '_blank');
+});
+
+resetBtn.addEventListener('click', () => {
+  socket.emit('reset');
+});
+
+// ── Init ─────────────────────────────────────────────────────────
+updateGradient();
+</script>
+</body>
+</html>

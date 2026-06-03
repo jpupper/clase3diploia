@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Visual Synth — Shader Output</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* Overlay minimal */
+  .overlay {
+    position: fixed;
+    top: 16px; left: 16px;
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.35);
+    pointer-events: none;
+    z-index: 10;
+    line-height: 1.6;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
+  .overlay .fps {
+    font-family: 'Courier New', monospace;
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.25);
+  }
+
+  .back-btn {
+    position: fixed;
+    bottom: 24px; left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 24px;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(0,0,0,0.6);
+    color: rgba(255,255,255,0.5);
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    font-size: 0.8rem;
+    cursor: pointer;
+    z-index: 10;
+    backdrop-filter: blur(8px);
+    transition: all 0.3s;
+    pointer-events: auto;
+  }
+  .back-btn:hover {
+    border-color: rgba(255,255,255,0.3);
+    color: rgba(255,255,255,0.8);
+    background: rgba(0,0,0,0.8);
+  }
+</style>
+</head>
+<body>
+
+<canvas id="glCanvas"></canvas>
+
+<div class="overlay">
+  <div class="fps" id="fpsDisplay">-- FPS</div>
+</div>
+
+<button class="back-btn" id="backBtn">← Volver al Controlador</button>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  VISUAL SYNTH — SHADER OUTPUT (Raw WebGL)
+// ═══════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('glCanvas');
+let gl = null;
+
+// ── Vertex shader (full-screen quad) ──────────────────────────
+const vsSource = `
+  attribute vec2 aPosition;
+  varying vec2 vUv;
+  void main() {
+    vUv = aPosition * 0.5 + 0.5;
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+  }
+`;
+
+// ── Fragment shader (noise) ───────────────────────────────────
+const fsSource = `
+  precision highp float;
+
+  varying vec2 vUv;
+
+  uniform float uTime;
+  uniform float uSpeed;
+  uniform float uScale;
+  uniform float uOctaves;
+  uniform float uDistortion;
+  uniform float uWarpSpeed;
+  uniform float uContrast;
+  uniform float uBrightness;
+  uniform float uSaturation;
+  uniform float uRotation;
+  uniform float uBlobAmount;
+  uniform float uLineAmount;
+  uniform vec3  uColor1;
+  uniform vec3  uColor2;
+  uniform vec3  uColor3;
+  uniform float uAspect;
+
+  // ── Value Noise 3D (ultra-portable, funciona en todos los GPUs) ─
+  float hash(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+
+  float noise(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f); // smoothstep
+
+    float a = hash(i);
+    float b = hash(i + vec3(1,0,0));
+    float c = hash(i + vec3(0,1,0));
+    float d = hash(i + vec3(1,1,0));
+    float e = hash(i + vec3(0,0,1));
+    float f_ = hash(i + vec3(1,0,1));
+    float g = hash(i + vec3(0,1,1));
+    float h_ = hash(i + vec3(1,1,1));
+
+    float u1 = mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+    float u2 = mix(mix(e,f_,f.x), mix(g,h_,f.x), f.y);
+    return mix(u1, u2, f.z);
+  }
+
+  // ── FBM (Fractal Brownian Motion) ───────────────────────────
+  float fbm(vec3 p) {
+    float value = 0.0;
+    float amp = 0.5;
+    float freq = 1.0;
+    float totalAmp = 0.0;
+    for (int i = 0; i < 8; i++) {
+      float w = float(i) < uOctaves ? 1.0 : 0.0;
+      value += amp * noise(p * freq) * w;
+      totalAmp += amp * w;
+      freq *= 2.0;
+      amp *= 0.5;
+    }
+    return value / max(totalAmp, 0.001);
+  }
+
+  // ── Domain Warp (two layers) ────────────────────────────────
+  float domainWarp(vec2 uv, float time) {
+    vec3 p = vec3(uv, time * uWarpSpeed);
+    float warpX = noise(p) * uDistortion * 2.0;
+    float warpY = noise(p + 100.0) * uDistortion * 2.0;
+    vec2 warpedUv = uv + vec2(warpX, warpY);
+
+    // Segunda capa de warping para más complejidad orgánica
+    vec3 p2 = vec3(warpedUv * 0.5, time * uWarpSpeed * 0.3);
+    float warpX2 = noise(p2) * uDistortion * 0.8;
+    float warpY2 = noise(p2 + 200.0) * uDistortion * 0.8;
+    vec2 finalUv = warpedUv + vec2(warpX2, warpY2);
+
+    return fbm(vec3(finalUv, time));
+  }
+
+  // ── Main ────────────────────────────────────────────────────
+  void main() {
+    vec2 uv = vUv;
+
+    // Centrar
+    uv = uv * 2.0 - 1.0;
+
+    // Aspect ratio correction
+    uv.x *= uAspect;
+
+    // Scale
+    uv *= uScale;
+
+    // Rotation
+    float angle = uRotation * 6.28318;
+    float s = sin(angle);
+    float c_ = cos(angle);
+    uv = vec2(uv.x * c_ - uv.y * s, uv.x * s + uv.y * c_);
+
+    float time = uTime * uSpeed;
+
+    // Noise con domain warp
+    float n = domainWarp(uv, time);
+
+    // Normalizar a [0,1]
+    n = n * 0.5 + 0.5;
+
+    // ── Blob effect ──
+    float blobDist = length(uv);
+    float blob = sin(blobDist * 4.0 - time * 0.8) * 0.5 + 0.5;
+    n = mix(n, n * blob * 1.5, uBlobAmount);
+
+    // ── Line effect ──
+    float lines = sin(uv.x * 12.0 + n * 6.0 + time * 1.5) * 0.5 + 0.5;
+    n = mix(n, lines, uLineAmount);
+
+    // Clamp
+    n = clamp(n, 0.0, 1.0);
+
+    // ── Contrast ──
+    n = clamp((n - 0.5) * uContrast + 0.5, 0.0, 1.0);
+
+    // ── Color palette ──
+    vec3 color = mix(uColor1, uColor2, smoothstep(0.0, 0.5, n));
+    color = mix(color, uColor3, smoothstep(0.5, 1.0, n));
+
+    // Micro-detail: ondas finas de color
+    float detail = sin(n * 25.0) * 0.5 + 0.5;
+    color += (uColor2 - uColor1) * detail * 0.08;
+
+    // ── Saturation ──
+    float gray = dot(color, vec3(0.299, 0.587, 0.114));
+    color = mix(vec3(gray), color, uSaturation);
+
+    // ── Brightness ──
+    color += uBrightness - 0.5;
+
+    // ── Vignette ──
+    float vigDist = length(vUv - 0.5);
+    float vignette = 1.0 - vigDist * 0.7;
+    color *= vignette;
+
+    gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+  }
+`;
+
+// ── Inicializar WebGL ────────────────────────────────────────────
+function initGL() {
+  gl = canvas.getContext('webgl', { antialias: true, alpha: false, premultipliedAlpha: false });
+  if (!gl) {
+    gl = canvas.getContext('experimental-webgl', { antialias: true, alpha: false });
+    if (!gl) {
+      document.body.innerHTML = '<div style="color:red;padding:40px;font-family:sans-serif;">WebGL no disponible</div>';
+      return false;
+    }
+  }
+  return true;
+}
+
+// ── Compilar shader ──────────────────────────────────────────────
+function compileShader(src, type) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, src);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(shader);
+    const typeName = type === gl.FRAGMENT_SHADER ? 'FRAGMENT' : 'VERTEX';
+    console.error(`✗ ${typeName} SHADER ERROR:`, log);
+    showError(`SHADER ERROR [${typeName}]: ${log}`);
+    gl.deleteShader(shader);
+    return null;
+  }
+  return shader;
+}
+
+// ── Mostrar error en pantalla ────────────────────────────────────
+function showError(msg) {
+  const div = document.createElement('div');
+  div.style.cssText = 'position:fixed;top:0;left:0;width:100%;padding:40px;background:#1a0000;color:#ff4444;font-family:monospace;font-size:14px;z-index:9999;white-space:pre-wrap;word-break:break-word;border-bottom:2px solid #ff0000;';
+  div.textContent = '✗ ' + msg;
+  document.body.prepend(div);
+}
+
+// ── Crear programa ───────────────────────────────────────────────
+let program, uniforms, attribs;
+
+function createProgram() {
+  const vs = compileShader(vsSource, gl.VERTEX_SHADER);
+  const fs = compileShader(fsSource, gl.FRAGMENT_SHADER);
+  if (!vs || !fs) {
+    showError('SHADER COMPILATION FAILED — see console for details');
+    return false;
+  }
+
+  program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const log = gl.getProgramInfoLog(program);
+    console.error('✗ PROGRAM LINK ERROR:', log);
+    showError('PROGRAM LINK ERROR: ' + log);
+    return false;
+  }
+
+  gl.useProgram(program);
+
+  // Uniforms
+  uniforms = {
+    uTime:        gl.getUniformLocation(program, 'uTime'),
+    uSpeed:       gl.getUniformLocation(program, 'uSpeed'),
+    uScale:       gl.getUniformLocation(program, 'uScale'),
+    uOctaves:     gl.getUniformLocation(program, 'uOctaves'),
+    uDistortion:  gl.getUniformLocation(program, 'uDistortion'),
+    uWarpSpeed:   gl.getUniformLocation(program, 'uWarpSpeed'),
+    uContrast:    gl.getUniformLocation(program, 'uContrast'),
+    uBrightness:  gl.getUniformLocation(program, 'uBrightness'),
+    uSaturation:  gl.getUniformLocation(program, 'uSaturation'),
+    uRotation:    gl.getUniformLocation(program, 'uRotation'),
+    uBlobAmount:  gl.getUniformLocation(program, 'uBlobAmount'),
+    uLineAmount:  gl.getUniformLocation(program, 'uLineAmount'),
+    uColor1:      gl.getUniformLocation(program, 'uColor1'),
+    uColor2:      gl.getUniformLocation(program, 'uColor2'),
+    uColor3:      gl.getUniformLocation(program, 'uColor3'),
+    uAspect:      gl.getUniformLocation(program, 'uAspect'),
+  };
+
+  // Attributes
+  attribs = {
+    aPosition: gl.getAttribLocation(program, 'aPosition'),
+  };
+
+  return true;
+}
+
+// ── Full-screen quad ─────────────────────────────────────────────
+let vertexBuffer;
+
+function createQuad() {
+  // Two triangles forming a full-screen quad
+  const vertices = new Float32Array([
+    -1, -1,
+     1, -1,
+    -1,  1,
+     1,  1,
+  ]);
+
+  vertexBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+}
+
+// ── State ────────────────────────────────────────────────────────
+const state = {
+  speed: 0.3,
+  scale: 2.0,
+  octaves: 4,
+  distortion: 0.5,
+  warpSpeed: 0.5,
+  contrast: 1.0,
+  brightness: 0.5,
+  saturation: 1.0,
+  rotation: 0.0,
+  blobAmount: 0.0,
+  lineAmount: 0.0,
+  color1: '#ff0055',
+  color2: '#00ff88',
+  color3: '#4466ff',
+};
+
+// ── Hex to vec3 ──────────────────────────────────────────────────
+function hexToVec3(hex) {
+  const r = parseInt(hex.slice(1,3), 16) / 255;
+  const g = parseInt(hex.slice(3,5), 16) / 255;
+  const b = parseInt(hex.slice(5,7), 16) / 255;
+  return [r, g, b];
+}
+
+// ── Render loop ──────────────────────────────────────────────────
+let startTime = performance.now();
+let frameCount = 0;
+let fps = 0;
+let lastFpsTime = 0;
+
+function render(now) {
+  // FPS counter
+  frameCount++;
+  if (now - lastFpsTime >= 1000) {
+    fps = frameCount;
+    frameCount = 0;
+    lastFpsTime = now;
+    document.getElementById('fpsDisplay').textContent = `${fps} FPS`;
+  }
+
+  const time = (now - startTime) / 1000;
+
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  gl.useProgram(program);
+
+  // Set uniforms
+  gl.uniform1f(uniforms.uTime, time);
+  gl.uniform1f(uniforms.uSpeed, state.speed);
+  gl.uniform1f(uniforms.uScale, state.scale);
+  gl.uniform1f(uniforms.uOctaves, state.octaves);
+  gl.uniform1f(uniforms.uDistortion, state.distortion);
+  gl.uniform1f(uniforms.uWarpSpeed, state.warpSpeed);
+  gl.uniform1f(uniforms.uContrast, state.contrast);
+  gl.uniform1f(uniforms.uBrightness, state.brightness);
+  gl.uniform1f(uniforms.uSaturation, state.saturation);
+  gl.uniform1f(uniforms.uRotation, state.rotation);
+  gl.uniform1f(uniforms.uBlobAmount, state.blobAmount);
+  gl.uniform1f(uniforms.uLineAmount, state.lineAmount);
+  gl.uniform1f(uniforms.uAspect, canvas.width / canvas.height);
+
+  const c1 = hexToVec3(state.color1);
+  const c2 = hexToVec3(state.color2);
+  const c3 = hexToVec3(state.color3);
+  gl.uniform3fv(uniforms.uColor1, c1);
+  gl.uniform3fv(uniforms.uColor2, c2);
+  gl.uniform3fv(uniforms.uColor3, c3);
+
+  // Bind vertex buffer
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+  gl.enableVertexAttribArray(attribs.aPosition);
+  gl.vertexAttribPointer(attribs.aPosition, 2, gl.FLOAT, false, 0, 0);
+
+  // Draw
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  requestAnimationFrame(render);
+}
+
+// ── Resize ────────────────────────────────────────────────────────
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+}
+
+// ── Socket.IO ────────────────────────────────────────────────────
+const socket = io();
+
+socket.on('connect', () => {
+  socket.emit('getState');
+});
+
+socket.on('init', (data) => {
+  Object.assign(state, data);
+});
+
+socket.on('state', (data) => {
+  Object.assign(state, data);
+});
+
+// ── Back button ──────────────────────────────────────────────────
+document.getElementById('backBtn').addEventListener('click', () => {
+  window.close();
+});
+
+// ── Init ─────────────────────────────────────────────────────────
+window.addEventListener('resize', resize);
+
+if (initGL()) {
+  resize();
+  if (createProgram()) {
+    createQuad();
+    requestAnimationFrame(render);
+  } else {
+    showError('No se pudo crear el programa de shaders');
+  }
+} else {
+  showError('WebGL no está disponible en este navegador');
+}
+</script>
+</body>
+</html>
