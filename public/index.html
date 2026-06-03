@@ -259,6 +259,141 @@
     transform: translateY(0);
   }
 
+  /* ── Save Preset ── */
+  .save-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .save-row input[type="text"] {
+    flex: 1;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 0.85rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.3s;
+  }
+  .save-row input[type="text"]:focus {
+    border-color: var(--accent2);
+  }
+  .save-row input[type="text"]::placeholder {
+    color: var(--text-dim);
+  }
+
+  .btn-save {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent2), #00cc66);
+    color: #000;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+  .btn-save:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(0,255,136,0.3);
+  }
+  .btn-save:active { transform: scale(0.97); }
+
+  /* ── Saved Presets List ── */
+  .saved-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .saved-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    transition: all 0.2s;
+    gap: 8px;
+  }
+  .saved-item:hover {
+    border-color: #3a3a55;
+  }
+  .saved-item .name {
+    font-size: 0.85rem;
+    font-weight: 500;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .saved-item .actions {
+    display: flex;
+    gap: 6px;
+    margin: 0;
+  }
+  .saved-item .actions button {
+    padding: 5px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .saved-item .btn-load {
+    background: rgba(0,255,136,0.15);
+    color: var(--accent2);
+  }
+  .saved-item .btn-load:hover {
+    background: rgba(0,255,136,0.25);
+  }
+  .saved-item .btn-delete {
+    background: rgba(255,0,102,0.15);
+    color: var(--accent);
+  }
+  .saved-item .btn-delete:hover {
+    background: rgba(255,0,102,0.25);
+  }
+  .saved-empty {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    padding: 20px 0;
+  }
+  .toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    z-index: 100;
+    pointer-events: none;
+    transition: all 0.3s;
+    opacity: 0;
+  }
+  .toast.show {
+    opacity: 1;
+  }
+  .toast.success {
+    background: rgba(0,255,136,0.2);
+    border: 1px solid var(--accent2);
+    color: var(--accent2);
+  }
+  .toast.error {
+    background: rgba(255,0,102,0.2);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+  }
+
   /* ── Action buttons ── */
   .actions {
     display: flex;
@@ -420,6 +555,23 @@
     </div>
   </div>
 
+  <!-- Save Preset -->
+  <div class="card">
+    <div class="card-title"><span class="icon">💾</span> Guardar Preset</div>
+    <div class="save-row">
+      <input type="text" id="presetName" placeholder="Nombre del preset..." maxlength="40">
+      <button class="btn-save" id="savePresetBtn">💾 Guardar</button>
+    </div>
+  </div>
+
+  <!-- Saved Presets -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📂</span> Mis Presets</div>
+    <div class="saved-list" id="savedList">
+      <div class="saved-empty">No hay presets guardados todavía</div>
+    </div>
+  </div>
+
   <!-- Actions -->
   <div class="card" style="border-color: transparent; background: transparent; padding: 0;">
     <div class="actions">
@@ -428,6 +580,8 @@
     </div>
   </div>
 </div>
+
+<div class="toast" id="toast"></div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -562,6 +716,120 @@ document.querySelectorAll('.preset-btn').forEach(btn => {
     socket.emit('update', readState());
   });
 });
+
+// ── Toast ────────────────────────────────────────────────────────
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function showToast(msg, type = 'success') {
+  toastEl.textContent = msg;
+  toastEl.className = 'toast ' + type + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.className = 'toast'; }, 2500);
+}
+
+// ── Presets API ──────────────────────────────────────────────────
+const presetNameInput = document.getElementById('presetName');
+const savePresetBtn = document.getElementById('savePresetBtn');
+const savedList = document.getElementById('savedList');
+
+async function loadPresetsList() {
+  try {
+    const res = await fetch('/api/presets');
+    const presets = await res.json();
+    if (presets.length === 0) {
+      savedList.innerHTML = '<div class="saved-empty">No hay presets guardados todavía</div>';
+      return;
+    }
+    savedList.innerHTML = presets.map(p => `
+      <div class="saved-item">
+        <span class="name">${escapeHtml(p.name)}</span>
+        <div class="actions">
+          <button class="btn-load" data-name="${escapeHtml(p.name)}">Cargar</button>
+          <button class="btn-delete" data-name="${escapeHtml(p.name)}">✕</button>
+        </div>
+      </div>
+    `).join('');
+
+    // Event listeners para cada item
+    savedList.querySelectorAll('.btn-load').forEach(btn => {
+      btn.addEventListener('click', () => loadPreset(btn.dataset.name));
+    });
+    savedList.querySelectorAll('.btn-delete').forEach(btn => {
+      btn.addEventListener('click', () => deletePreset(btn.dataset.name));
+    });
+  } catch (err) {
+    console.error('Error loading presets:', err);
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+async function savePreset() {
+  const name = presetNameInput.value.trim();
+  if (!name) {
+    showToast('Escribí un nombre para el preset', 'error');
+    presetNameInput.focus();
+    return;
+  }
+  const params = readState();
+  try {
+    const res = await fetch('/api/presets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, params })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`✅ Preset "${data.name}" guardado`);
+      presetNameInput.value = '';
+      loadPresetsList();
+    } else {
+      showToast('Error al guardar: ' + (data.error || 'desconocido'), 'error');
+    }
+  } catch (err) {
+    showToast('Error de conexión al guardar', 'error');
+  }
+}
+
+async function loadPreset(name) {
+  try {
+    const res = await fetch(`/api/presets/${encodeURIComponent(name)}`);
+    const data = await res.json();
+    if (data.params) {
+      applyState(data.params);
+      socket.emit('update', readState());
+      showToast(`📂 Preset "${data.name}" cargado`);
+    }
+  } catch (err) {
+    showToast('Error al cargar preset', 'error');
+  }
+}
+
+async function deletePreset(name) {
+  if (!confirm(`¿Eliminar preset "${name}"?`)) return;
+  try {
+    const res = await fetch(`/api/presets/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`🗑 Preset "${name}" eliminado`);
+      loadPresetsList();
+    }
+  } catch (err) {
+    showToast('Error al eliminar', 'error');
+  }
+}
+
+savePresetBtn.addEventListener('click', savePreset);
+presetNameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') savePreset();
+});
+
+// Cargar lista de presets al iniciar
+loadPresetsList();
 
 // ── Input events ─────────────────────────────────────────────────
 for (const [key, ctrl] of Object.entries(controls)) {
