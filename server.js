@@ -6,13 +6,24 @@ const os = require('os');
 const fs = require('fs');
 
 const app = express();
+
+// Render corre detrás de un proxy — confiar en X-Forwarded-*
+app.set('trust proxy', true);
+
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*' }
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true,
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ── Health check (Render) ─────────────────────────────────────────
+app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
 // ── Directorio de presets ─────────────────────────────────────────
 const PRESETS_DIR = path.join(__dirname, 'presets');
@@ -150,15 +161,21 @@ function getLocalIP() {
 
 // ── Arranque ─────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3541;
+const isRender = !!process.env.RENDER;
 server.listen(PORT, '0.0.0.0', () => {
-  const ip = getLocalIP();
   console.log('');
   console.log('  ╔══════════════════════════════════════════╗');
   console.log('  ║     ◆  VISUAL SYNTH SHADER v1.0  ◆      ║');
   console.log('  ╠══════════════════════════════════════════╣');
-  console.log(`  ║  🎛  Control:  http://localhost:${PORT}     ║`);
-  console.log(`  ║  🖥  Visual:   http://${ip}:${PORT}/visual.html  ║`);
-  console.log(`  ║  🖥  Local:    http://localhost:${PORT}/visual.html  ║`);
+  if (isRender) {
+    console.log(`  ║  🚀 Render URL: ${process.env.RENDER_EXTERNAL_URL || 'https://' + process.env.RENDER_SERVICE_NAME + '.onrender.com'}  ║`);
+    console.log(`  ║  🖥  Visual:   /visual.html                   ║`);
+  } else {
+    const ip = getLocalIP();
+    console.log(`  ║  🎛  Control:  http://localhost:${PORT}     ║`);
+    console.log(`  ║  🖥  Visual:   http://${ip}:${PORT}/visual.html  ║`);
+    console.log(`  ║  🖥  Local:    http://localhost:${PORT}/visual.html  ║`);
+  }
   console.log('  ╚══════════════════════════════════════════╝');
   console.log('');
 });
